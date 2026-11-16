@@ -1,0 +1,16 @@
+import 'dotenv/config';
+import express from 'express';
+import mongoose from 'mongoose';
+import cors from 'cors';
+import {validateTransaction} from './validation.js';
+if(!process.env.MONGODB_URI)throw new Error('Set MONGODB_URI in .env before starting the API.');
+await mongoose.connect(process.env.MONGODB_URI);
+const schema=new mongoose.Schema({title:{type:String,required:true},amount:{type:Number,required:true},type:{type:String,enum:['income','expense'],required:true},category:{type:String,required:true},date:{type:String,required:true}},{timestamps:true,toJSON:{transform:(_doc,ret)=>{ret.id=ret._id.toString();delete ret._id;delete ret.__v;return ret;}}});
+const Transaction=mongoose.model('Transaction',schema),app=express();
+app.use(cors({origin:process.env.CORS_ORIGIN||'http://localhost:5173'}));app.use(express.json({limit:'16kb'}));
+app.get('/api/health',(_req,res)=>res.json({status:'ok'}));
+app.get('/api/transactions',async(_req,res,next)=>{try{res.json(await Transaction.find().sort({date:-1}).limit(10000))}catch(e){next(e)}});
+app.post('/api/transactions',async(req,res,next)=>{let data;try{data=validateTransaction(req.body)}catch(e){return res.status(400).json({error:e.message})}try{res.status(201).json(await Transaction.create(data))}catch(e){next(e)}});
+app.delete('/api/transactions/:id',async(req,res,next)=>{if(!mongoose.isValidObjectId(req.params.id))return res.status(400).json({error:'Invalid ID'});try{const r=await Transaction.findByIdAndDelete(req.params.id);res.status(r?204:404).end()}catch(e){next(e)}});
+app.use((err,_req,res,_next)=>{console.error(err.message);res.status(err.status===400?400:500).json({error:err.status===400?'Invalid JSON body':'An unexpected error occurred.'})});
+app.listen(Number(process.env.PORT)||4000,'127.0.0.1',()=>console.log('Ledger API ready on port '+(process.env.PORT||4000)));
